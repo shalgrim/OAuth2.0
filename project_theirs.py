@@ -1,26 +1,29 @@
+import json
 import random
 import string
 
+import httplib2
+import requests
 from database_setup import Base, MenuItem, Restaurant
-from flask import Flask, flash, jsonify, redirect, render_template, request
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+)
 from flask import session as login_session
 from flask import url_for
+from oauth2client.client import FlowExchangeError, flow_from_clientsecrets
 from sqlalchemy import asc, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from oauth2client.client import flow_from_clientsecrets
-from oauth2client.client import FlowExchangeError
-import httplib2
-import json
-from flask import make_response
-import requests
-
-
-with open('client_secrets.json') as f:
-    CLIENT_ID = json.loads(f.read())['web']['client_id']
-
-
 app = Flask(__name__)
+
+CLIENT_ID = json.loads(open('client_secrets.json', 'r').read())['web']['client_id']
+APPLICATION_NAME = 'Restaurant Menu Application'
 
 
 # Connect to Database and create database session
@@ -31,15 +34,13 @@ DBSession = sessionmaker(bind=engine)
 session = DBSession()
 
 
-# Create anti-forgery token
+# Create anti-forgery state token
 @app.route('/login')
-def show_login():
+def showLogin():
     state = ''.join(
         random.choice(string.ascii_uppercase + string.digits) for x in range(32)
     )
     login_session['state'] = state
-    login_session['foo'] = 'bar'
-    # import ipdb; ipdb.set_trace()
     return render_template('login.html', STATE=state)
 
 
@@ -67,11 +68,6 @@ def restaurantsJSON():
 @app.route('/')
 @app.route('/restaurant/')
 def showRestaurants():
-    # import ipdb; ipdb.set_trace()
-    print('restaurant')
-    print('login_session.keys(): {}'.format(login_session.keys()))
-    print('id: {}'.format(id(login_session)))
-    # import ipdb; ipdb.set_trace()
     restaurants = session.query(Restaurant).order_by(asc(Restaurant.name))
     return render_template('restaurants.html', restaurants=restaurants)
 
@@ -192,16 +188,16 @@ def deleteMenuItem(restaurant_id, menu_id):
 
 @app.route('/gconnect', methods=['POST'])
 def gconnect():
-    # import ipdb; ipdb.set_trace()
+    # Validate state token
     if request.args.get('state') != login_session['state']:
         response = make_response(json.dumps('Invalid state parameter'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
+    # Obtain authorization code
     code = request.data
-    try:
-        # Upgrade the authorization code into a credentials object [sic]
 
-        # v Why wouldn't we use `CLIENT_ID` here?
+    try:
+        # Upgrade the authorization code into a credentials object
         oauth_flow = flow_from_clientsecrets('client_secrets.json', scope='')
         oauth_flow.redirect_uri = 'postmessage'
         credentials = oauth_flow.step2_exchange(code)
@@ -214,8 +210,8 @@ def gconnect():
 
     # Check that the access token is valid
     access_token = credentials.access_token
-    url = 'https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={}'.format(
-        access_token
+    url = (
+        'https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=%s' % access_token
     )
     h = httplib2.Http()
     result = json.loads(h.request(url, 'GET')[1])
@@ -224,6 +220,7 @@ def gconnect():
     if result.get('error') is not None:
         response = make_response(json.dumps(result.get('error')), 500)
         response.headers['Content-Type'] = 'application/json'
+        return response
 
     # Verify that the access token is used for the intended user
     gplus_id = credentials.id_token['sub']
@@ -239,93 +236,77 @@ def gconnect():
         response = make_response(
             json.dumps("Token's client ID does not match app's"), 401
         )
-        print("Token's client ID does not match app's")
+        print "Token's client ID does not match app's"
         response.headers['Content-Type'] = 'application/json'
         return response
 
-    # Check to see if user is already logged in
-    # stored_credentials = login_session.get('credentials')
     stored_access_token = login_session.get('access_token')
     stored_gplus_id = login_session.get('gplus_id')
-    if stored_access_token is not None and gplus_id == stored_gplus_id:
+    if stored_access_token is not None and gplus_id == stored_gplus_id:  # KEY DIFFERENCE
         response = make_response(json.dumps('Current user is already connected.'), 200)
         response.headers['Content-Type'] = 'application/json'
-        return response
+        return response  # KEY DIFFERENCE
 
-    # Store the access token in the session for later use
-    # login_session['credentials'] = credentials
-    login_session['access_token'] = credentials.access_token
+    # Store the access token in the session for later use.
+    login_session['access_token'] = credentials.access_token  # KEY DIFFERENCE
     login_session['gplus_id'] = gplus_id
 
     # Get user info
     userinfo_url = 'https://www.googleapis.com/oauth2/v1/userinfo'
     params = {'access_token': credentials.access_token, 'alt': 'json'}
     answer = requests.get(userinfo_url, params=params)
-    data = json.loads(answer.text)
+    data = answer.json()  # KEY DIFFERENCE?
     login_session['username'] = data['name']
     login_session['picture'] = data['picture']
     login_session['email'] = data['email']
-    print('gconnect')
-    print('login_session.keys(): {}'.format(login_session.keys()))
-    print('id: {}'.format(id(login_session)))
-    # import ipdb; ipdb.set_trace()
 
-    output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
-    output += '<img src="{}" '.format(login_session['picture'])
-    output += (
-        'style = "width: 300px; height: 300px;'
-        'border-radius: 150px;-webkit-border-radius: 150px;'
-        '-moz-border-radius: 150px;"> '
-    )
-    print('about to flash')
-    # import ipdb; ipdb.set_trace()
-    flash('You are now logged in as {}'.format(login_session['username']))
+    output = ''
+    output += '<h1>Welcome, '
+    output += login_session['username']
+    output += '!</h1>'
+    output += '<img src="'
+    output += login_session['picture']
+    output += ' " style = "width: 300px; height: 300px;border-radius: 150px;-webkit-border-radius: 150px;-moz-border-radius: 150px;"> '
+    flash('you are now logged in as %s' % login_session['username'])
+    print 'done!'
+    return output
 
-    return output  # but not the response?
+    # DISCONNECT - Revoke a current user's token and reset their login_session
 
 
 @app.route('/gdisconnect')
 def gdisconnect():
-    """revoke the current user's token and reset their login_session"""
-    # import ipdb; ipdb.set_trace()
-    # credentials = login_session.get('credentials')
-    print('gdisconnect')
-    print('login_session.keys(): {}'.format(login_session.keys()))
-    print('id: {}'.format(id(login_session)))
-    # import ipdb; ipdb.set_trace()
     access_token = login_session.get('access_token')
-
-    # only disconnect a connected user
-    # if credentials is None:
     if access_token is None:
-        print('Access Token is None')
+        print 'Access Token is None'
         response = make_response(json.dumps('Current user not connected'), 401)
         response.headers['Content-Type'] = 'application/json'
         return response
-
-    print('In gdisconnect access token is {}'.format(access_token))
-    print('username is: {}'.format(login_session['username']))
-
-    # execute HTTP GET request to revoke current token
-    url = 'https://accounts.google.com/o/oauth2/revoke?token={}'.format(access_token)
+    print 'In gdisconnect access token is %s', access_token
+    print 'User name is: '
+    print login_session['username']
+    url = (
+        'https://accounts.google.com/o/oauth2/revoke?token=%s'  # KEY DIFFERENCE
+        % login_session['access_token']
+    )
+    print('url: {}'.format(url))
     h = httplib2.Http()
     result = h.request(url, 'GET')[0]
-
-    if result['status'] == '200':  # as a string?
-        # reset the user's session
-        # del login_session['credentials']
-        del login_session['access_token']
+    print 'result is '
+    print result
+    if result['status'] == '200':
+        del login_session['access_token']  # KEY DIFFERENCE
         del login_session['gplus_id']
         del login_session['username']
         del login_session['email']
         del login_session['picture']
-
         response = make_response(json.dumps('Successfully disconnected'), 200)
         response.headers['Content-Type'] = 'application/json'
         return response
     else:
-        # given token was invalid
-        response = make_response(json.dumps('Failed to revoke token', 400))
+        response = make_response(
+            json.dumps('Failed to revoke token for given user.', 400)
+        )
         response.headers['Content-Type'] = 'application/json'
         return response
 
