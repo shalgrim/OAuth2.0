@@ -1,20 +1,24 @@
+import json
 import random
 import string
 
-from database_setup import Base, MenuItem, Restaurant
-from flask import Flask, flash, jsonify, redirect, render_template, request
+import httplib2
+import requests
+from database_setup import Base, MenuItem, Restaurant, User
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+)
 from flask import session as login_session
 from flask import url_for
+from oauth2client.client import FlowExchangeError, flow_from_clientsecrets
 from sqlalchemy import asc, create_engine
 from sqlalchemy.orm import sessionmaker
-
-from oauth2client.client import flow_from_clientsecrets
-from oauth2client.client import FlowExchangeError
-import httplib2
-import json
-from flask import make_response
-import requests
-
 
 with open('client_secrets.json') as f:
     CLIENT_ID = json.loads(f.read())['web']['client_id']
@@ -77,7 +81,9 @@ def newRestaurant():
     if 'username' not in login_session:
         return redirect('/login')
     if request.method == 'POST':
-        newRestaurant = Restaurant(name=request.form['name'])
+        newRestaurant = Restaurant(
+            name=request.form['name'], user_id=login_session['user_id']
+        )
         session.add(newRestaurant)
         flash('New Restaurant %s Successfully Created' % newRestaurant.name)
         session.commit()
@@ -138,6 +144,7 @@ def newMenuItem(restaurant_id):
             price=request.form['price'],
             course=request.form['course'],
             restaurant_id=restaurant_id,
+            user_id=restaurant.user_id,
         )
         session.add(newItem)
         session.commit()
@@ -198,7 +205,6 @@ def deleteMenuItem(restaurant_id, menu_id):
 
 @app.route('/gconnect', methods=['POST'])
 def gconnect():
-    # import ipdb; ipdb.set_trace()
     if request.args.get('state') != login_session['state']:
         response = make_response(json.dumps('Invalid state parameter'), 401)
         response.headers['Content-Type'] = 'application/json'
@@ -271,10 +277,9 @@ def gconnect():
     login_session['username'] = data['name']
     login_session['picture'] = data['picture']
     login_session['email'] = data['email']
-    print('gconnect')
-    print('login_session.keys(): {}'.format(login_session.keys()))
-    print('id: {}'.format(id(login_session)))
-    # import ipdb; ipdb.set_trace()
+
+    user_id = get_user_id(data['email'])
+    login_session['user_id'] = user_id if user_id is not None else create_user(login_session)
 
     output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
     output += '<img src="{}" '.format(login_session['picture'])
@@ -284,7 +289,6 @@ def gconnect():
         '-moz-border-radius: 150px;"> '
     )
     print('about to flash')
-    # import ipdb; ipdb.set_trace()
     flash('You are now logged in as {}'.format(login_session['username']))
 
     return output  # but not the response?
@@ -334,6 +338,31 @@ def gdisconnect():
         response = make_response(json.dumps('Failed to revoke token', 400))
         response.headers['Content-Type'] = 'application/json'
         return response
+
+
+def create_user(login_session):
+    new_user = User(
+        name=login_session['username'],
+        email=login_session['email'],
+        picture=login_session['picture'],
+    )
+    session.add(new_user)
+    session.commit()
+    user = session.query(User).filter_by(email=login_session['email']).one()
+    return user.id
+
+
+def get_user_info(user_id):
+    user = session.query(User).filter_by(id=user_id).one()
+    return user
+
+
+def get_user_id(email):
+    try:
+        user = session.query(User).filter_by(email=email).one()
+        return user.id
+    except Exception:
+        return None
 
 
 if __name__ == '__main__':

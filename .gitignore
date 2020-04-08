@@ -205,3 +205,5 @@ dmypy.json
 .vagrant/
 
 /client_secrets.json
+/client_secrets_2.json
+/restaurantmenuwithusers.db
