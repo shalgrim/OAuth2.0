@@ -20,6 +20,7 @@ from oauth2client.client import FlowExchangeError, flow_from_clientsecrets
 from sqlalchemy import asc, create_engine
 from sqlalchemy.orm import sessionmaker
 
+
 with open('client_secrets.json') as f:
     CLIENT_ID = json.loads(f.read())['web']['client_id']
 
@@ -43,7 +44,6 @@ def show_login():
     )
     login_session['state'] = state
     login_session['foo'] = 'bar'
-    # import ipdb; ipdb.set_trace()
     return render_template('login.html', STATE=state)
 
 
@@ -256,7 +256,6 @@ def gconnect():
         return response
 
     # Check to see if user is already logged in
-    # stored_credentials = login_session.get('credentials')
     stored_access_token = login_session.get('access_token')
     stored_gplus_id = login_session.get('gplus_id')
     if stored_access_token is not None and gplus_id == stored_gplus_id:
@@ -265,7 +264,6 @@ def gconnect():
         return response
 
     # Store the access token in the session for later use
-    # login_session['credentials'] = credentials
     login_session['access_token'] = credentials.access_token
     login_session['gplus_id'] = gplus_id
 
@@ -279,7 +277,9 @@ def gconnect():
     login_session['email'] = data['email']
 
     user_id = get_user_id(data['email'])
-    login_session['user_id'] = user_id if user_id is not None else create_user(login_session)
+    login_session['user_id'] = (
+        user_id if user_id is not None else create_user(login_session)
+    )
 
     output = '<h1>Welcome, {}!</h1>'.format(login_session['username'])
     output += '<img src="{}" '.format(login_session['picture'])
