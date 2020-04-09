@@ -29,7 +29,7 @@ app = Flask(__name__)
 
 
 # Connect to Database and create database session
-engine = create_engine('sqlite:///restaurantmenu.db')
+engine = create_engine('sqlite:///restaurantmenuwithusers.db')
 Base.metadata.bind = engine
 
 DBSession = sessionmaker(bind=engine)
@@ -98,6 +98,9 @@ def editRestaurant(restaurant_id):
     if 'username' not in login_session:
         return redirect('/login')
     editedRestaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    owner_info = get_user_info(editedRestaurant.user_id)
+    if owner_info.name != login_session['username']:
+        return redirect('/login')
     if request.method == 'POST':
         if request.form['name']:
             editedRestaurant.name = request.form['name']
@@ -113,6 +116,9 @@ def deleteRestaurant(restaurant_id):
     if 'username' not in login_session:
         return redirect('/login')
     restaurantToDelete = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    owner_info = get_user_info(restaurantToDelete.user_id)
+    if owner_info.name != login_session['username']:
+        return redirect('/login')
     if request.method == 'POST':
         session.delete(restaurantToDelete)
         flash('%s Successfully Deleted' % restaurantToDelete.name)
@@ -128,7 +134,17 @@ def deleteRestaurant(restaurant_id):
 def showMenu(restaurant_id):
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
     items = session.query(MenuItem).filter_by(restaurant_id=restaurant_id).all()
-    return render_template('menu.html', items=items, restaurant=restaurant)
+
+    user_id = login_session.get('user_id')
+    print('user_id: {}'.format(user_id))
+
+    if user_id and user_id == restaurant.user_id:
+        template = 'menu.html'
+    else:
+        template = 'publicmenu.html'
+
+    creator = get_user_info(restaurant.user_id)
+    return render_template(template, items=items, restaurant=restaurant, creator=creator)
 
 
 # Create a new menu item
@@ -137,6 +153,10 @@ def newMenuItem(restaurant_id):
     if 'username' not in login_session:
         return redirect('/login')
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+
+    if 'user_id' not in login_session or login_session['user_id'] != restaurant.user_id:
+        return redirect('/login')
+
     if request.method == 'POST':
         newItem = MenuItem(
             name=request.form['name'],
@@ -163,6 +183,9 @@ def editMenuItem(restaurant_id, menu_id):
         return redirect('/login')
     editedItem = session.query(MenuItem).filter_by(id=menu_id).one()
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if 'user_id' not in login_session or login_session['user_id'] != restaurant.user_id:
+        return redirect('/login')
+
     if request.method == 'POST':
         if request.form['name']:
             editedItem.name = request.form['name']
@@ -193,6 +216,8 @@ def deleteMenuItem(restaurant_id, menu_id):
     if 'username' not in login_session:
         return redirect('/login')
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if 'user_id' not in login_session or login_session['user_id'] != restaurant.user_id:
+        return redirect('/login')
     itemToDelete = session.query(MenuItem).filter_by(id=menu_id).one()
     if request.method == 'POST':
         session.delete(itemToDelete)
@@ -329,6 +354,7 @@ def gdisconnect():
         del login_session['username']
         del login_session['email']
         del login_session['picture']
+        del login_session['user_id']
 
         response = make_response(json.dumps('Successfully disconnected'), 200)
         response.headers['Content-Type'] = 'application/json'
